@@ -32,7 +32,7 @@ The Makefile has 7 targets of interest:
 + all - run the script and validate (default)
 + clean - remove db but leave photo cache
 + clean-all - remove db and photo cache
-+ db_show - run the script and show the db scehma
++ db_show - run the script and show the db schema
 + photos - run the script and show the names of all the images in the database
 + validate - run the script and validate the file counts
 + exif - show the names of all the images and one EXIF key and value
