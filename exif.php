@@ -1,22 +1,59 @@
 <?php
 
-define('DB_FILE', 'photos.db');
+define('DB_FILE', 'exif.db');
 define('S3_BUCKET', 'http://s3.amazonaws.com/waldo-recruiting');
 define('PHOTO_CACHE', 'photos');
 
-main();
+/*
+ * Download data from s3 bucket and work through it
+ *
+ * @TODO Implement AWS pagination
+ * AWS only returns 1000 elemnts per query
+ * http://docs.aws.amazon.com/AmazonS3/latest/dev/ListingKeysUsingAPIs.html
+ *
+ */
+function main($concurrency) {
+    print("Running with $concurrency sessions.". PHP_EOL);
 
-function main() {
     try {
         $db = initDb();
         $xml = getXml();
+        echo "Found " . count($xml->Contents) . " 'Contents' entries" . PHP_EOL;
 
+        $count = 0;
+        $photo_ids = [];
+        $files = [];
         foreach ($xml as $elem) {
+            if ($count == 0) {
+                $photo_ids = [];
+                $files = [];
+            }
             if (isset($elem->Key)) {
-                $db->exec("INSERT INTO photos (name) VALUES ('$elem->Key')");
-                $photo_id = $db->lastInsertRowID();
-                $filepath = getPhoto("$elem->Key");
-                handleExif($db, $photo_id, $filepath);
+                $file = $elem->Key->__toString();
+                $db->exec("INSERT INTO photos (name) VALUES ('$file')");
+                $photo_ids["$file"] = $db->lastInsertRowID();
+
+                $files[] = $file;
+            }
+
+            // Call getPhotos when count of $files matches CONCURRENCY
+            if (count($files) == $concurrency) {
+                $filepaths = getPhotos($files);
+
+                foreach ($filepaths as $file=>$filepath) {
+                    handleExif($db, $photo_ids[$file], $filepath);
+                }
+                $count = 0;
+            } else {
+                $count++;
+            }
+        }
+
+        if (!empty($files)) {
+            $filepaths = getPhotos($files);
+
+            foreach ($filepaths as $file=>$filepath) {
+                handleExif($db, $photo_ids[$file], $filepath);
             }
         }
 
@@ -67,42 +104,55 @@ function handleExif($db, $photo_id, $filepath) {
 }
 
 /*
- * Download requested photo and verify is
+ * Download requested photos and verify each is
  * an image of type jpeg or tiff
  *
- * @return $filepath || False
+ * @return $filepaths
  */
-function getPhoto($file) {
-    $filepath = PHOTO_CACHE . "/" . $file;
+function getPhotos($files) {
+    if (empty($files)) return [];
 
-    if (!file_exists($filepath)) {
-        $ch = curl_init(S3_BUCKET . "/$file");
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_BINARYTRANSFER, true);
-        $data = curl_exec($ch);
-
-        if ($data) {
-            $fp = fopen($filepath, 'w');
-            fwrite($fp, $data);
-            fclose($fp);
-
-            // Check whether we have a valid image file
-            $mime = mime_content_type($filepath);
-            if ($mime != "image/jpeg" && $mime != "image/tiff") {
-                print("Bad file from server: $file" . PHP_EOL);
-                unlink($filepath);
-
-                return false;
-            } else {
-                return $filepath;
-            }
-        } else {
-            return false;
+    $filepaths = [];
+    $chs = array();
+    $cmh = curl_multi_init();
+    foreach ($files as $file) {
+        $filepath = PHOTO_CACHE . "/$file";
+        if (file_exists($filepath)) {
+            $filepaths[$file] = $filepath;
+            break;
         }
-    } else {
-        // Found in cache
-        return $filepath;
+
+        $ch = curl_init(S3_BUCKET . "/$file");
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_multi_add_handle($cmh, $ch);
+        $chs[$file] = $ch;
     }
+
+    $running=null;
+    do {
+        curl_multi_exec($cmh, $running);
+    } while ($running > 0);
+
+    foreach ($chs as $file=>$ch) {
+        $filepath = PHOTO_CACHE . "/$file";
+        file_put_contents($filepath, curl_multi_getcontent($ch));
+        curl_multi_remove_handle($cmh, $ch);
+        curl_close($ch);
+
+        // Check whether we have a valid image file
+        $mime = mime_content_type($filepath);
+        if ($mime != "image/jpeg" && $mime != "image/tiff") {
+            print("Bad file from server moved to: photos/bad/$file" . PHP_EOL);
+            rename($filepath, PHOTO_CACHE . "/bad/$file");
+
+        } else {
+            $filepaths[$file] = $filepath;
+        }
+
+    }
+    curl_multi_close($cmh);
+
+    return $filepaths;
 }
 
 /*

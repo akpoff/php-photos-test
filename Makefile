@@ -1,11 +1,14 @@
-DB=photos.db
+DB=exif.db
 PHOTOS="./photos"
+CONCURRENCY?=10
+
+.SUFFIXES: .db .php
+
+.php.db:
+	mkdir -p $(PHOTOS)/bad
+	php -r "require 'exif.php'; main($(CONCURRENCY));"
 
 all: db_show photos exif
-
-$(DB):
-	mkdir -p $(PHOTOS)
-	php exif.php
 
 db_show: $(DB)
 	sqlite3 $(DB) '.schema'
