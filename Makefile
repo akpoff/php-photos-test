@@ -14,7 +14,8 @@ photos: $(DB)
 	sqlite3 $(DB) 'SELECT * FROM photos'
 
 exif: $(DB)
-	sqlite3 $(DB) 'SELECT p.name, e.key, e.value FROM exif e JOIN photos p ON p.id = e.photo_id GROUP BY e.photo_id'
+	sqlite3 -header $(DB) 'SELECT p.name, e.key, e.value, e.base64_encoded FROM exif e JOIN photos p ON p.id = e.photo_id GROUP BY e.photo_id'
+	sqlite3 -header $(DB) 'SELECT p.name, e.key, e.value, e.base64_encoded FROM exif e JOIN photos p ON p.id = e.photo_id'
 
 clean:
 	rm -f $(DB)

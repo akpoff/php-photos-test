@@ -16,6 +16,7 @@ function main() {
                 $db->exec("INSERT INTO photos (name) VALUES ('$elem->Key')");
                 $photo_id = $db->lastInsertRowID();
                 $filepath = getPhoto("$elem->Key");
+                handleExif($db, $photo_id, $filepath);
             }
         }
 
@@ -23,6 +24,45 @@ function main() {
     } catch (Exception $e) {
         print("Caught error: " . $e);
         die("Terminating application.");
+    }
+}
+
+/*
+ * Get the EXIF data and put in db
+ *
+ */
+function handleExif($db, $photo_id, $filepath) {
+    if ($filepath) {
+        $exif = exif_read_data($filepath, 'EXIF', true);
+        if (isset($exif['EXIF'])) {
+            foreach ($exif['EXIF'] as $key=>$value) {
+                $pre = $value;
+
+                // serialize value if it's an array
+                if (is_array($value)) {
+                    $pre = serialize($value);
+                }
+
+                if (ctype_print($pre) || is_numeric($pre)) {
+                    $value_escape = $db->escapeString($pre);
+                    $values[] = "($photo_id, '$key', '$value_escape', 0)";
+                } elseif (!empty($pre)) {
+                    // Base64 encode non-printable characters
+                    // No need to escape the string since we're encoding it
+                    $enc = base64_encode($pre);
+                    $values[] = "($photo_id, '$key', '$enc', 1)";
+                }
+            }
+            if (!empty($values)) {
+                // Using a prepared statement here might be a bit safer than string encoding
+                $sql = "INSERT INTO exif (photo_id, key, value, base64_encoded) VALUES " . implode(',',$values);
+                $db->exec($sql);
+            } else {
+                print("No EXIF data found for: " . $filepath . PHP_EOL);
+            }
+        } else {
+            print("No EXIF data found for: " . $filepath. PHP_EOL);
+        }
     }
 }
 
