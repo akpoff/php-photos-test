@@ -142,7 +142,7 @@ function getPhotos($files) {
         // Check whether we have a valid image file
         $mime = mime_content_type($filepath);
         if ($mime != "image/jpeg" && $mime != "image/tiff") {
-            print("Bad file from server moved to: photos/bad/$file" . PHP_EOL);
+            trigger_error("Bad file from server moved to: photos/bad/$file", E_USER_WARNING);
             rename($filepath, PHOTO_CACHE . "/bad/$file");
 
         } else {
