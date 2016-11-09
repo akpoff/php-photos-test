@@ -2,6 +2,7 @@
 
 define('DB_FILE', 'photos.db');
 define('S3_BUCKET', 'http://s3.amazonaws.com/waldo-recruiting');
+define('PHOTO_CACHE', 'photos');
 
 main();
 
@@ -14,7 +15,7 @@ function main() {
             if (isset($elem->Key)) {
                 $db->exec("INSERT INTO photos (name) VALUES ('$elem->Key')");
                 $photo_id = $db->lastInsertRowID();
-                $db->exec("INSERT INTO exif (photo_id, key) VALUES ($photo_id, 'test')");
+                $filepath = getPhoto("$elem->Key");
             }
         }
 
@@ -22,6 +23,45 @@ function main() {
     } catch (Exception $e) {
         print("Caught error: " . $e);
         die("Terminating application.");
+    }
+}
+
+/*
+ * Download requested photo and verify is
+ * an image of type jpeg or tiff
+ *
+ * @return $filepath || False
+ */
+function getPhoto($file) {
+    $filepath = PHOTO_CACHE . "/" . $file;
+
+    if (!file_exists($filepath)) {
+        $ch = curl_init(S3_BUCKET . "/$file");
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_BINARYTRANSFER, true);
+        $data = curl_exec($ch);
+
+        if ($data) {
+            $fp = fopen($filepath, 'w');
+            fwrite($fp, $data);
+            fclose($fp);
+
+            // Check whether we have a valid image file
+            $mime = mime_content_type($filepath);
+            if ($mime != "image/jpeg" && $mime != "image/tiff") {
+                print("Bad file from server: $file" . PHP_EOL);
+                unlink($filepath);
+
+                return false;
+            } else {
+                return $filepath;
+            }
+        } else {
+            return false;
+        }
+    } else {
+        // Found in cache
+        return $filepath;
     }
 }
 
@@ -37,7 +77,7 @@ function initDb() {
     if ($is_new_db) {
         $db->exec('CREATE TABLE photos (id INTEGER PRIMARY KEY, name STRING)');
         // @TODO: Normalize the keys into another table
-        $db->exec('CREATE TABLE exif (id INTEGER PRIMARY KEY, photo_id INTEGER, key STRING, value STRING)');
+        $db->exec('CREATE TABLE exif (id INTEGER PRIMARY KEY, photo_id INTEGER, key STRING, value TEXT, base64_encoded INTEGER)');
     }
 
     return $db;
